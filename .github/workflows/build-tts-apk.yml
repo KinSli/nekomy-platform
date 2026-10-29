@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       voice:
-        description: "Piper voice (model dir without the 'vits-piper-' prefix), e.g. en_US-amy-medium, en_US-lessac-medium, en_GB-alba-medium"
+        description: "English Piper voice (model dir without the 'vits-piper-' prefix), e.g. en_GB-alan-medium, en_GB-southern_english_male-medium, en_GB-northern_english_male-medium"
         required: true
-        default: "en_US-amy-medium"
+        default: "en_GB-alan-medium"
       sherpa_onnx_version:
         description: "sherpa-onnx release tag"
         required: true
@@ -29,7 +29,7 @@ permissions:
   contents: read
 
 env:
-  VOICE: ${{ github.event.inputs.voice || 'en_US-amy-medium' }}
+  VOICE: ${{ github.event.inputs.voice || 'en_GB-alan-medium' }}
   SHERPA_ONNX_VERSION: ${{ github.event.inputs.sherpa_onnx_version || 'v2.0.1' }}
 
 jobs:
@@ -92,11 +92,13 @@ jobs:
         run: |
           set -ex
           model_dir=vits-piper-${VOICE}
-          lang2=${VOICE:0:2}
-          lang3=$(python3 -c "import sys; m={'en':'eng','de':'deu','fr':'fra','es':'spa','it':'ita','pt':'por','nl':'nld','ru':'rus','pl':'pol','uk':'ukr','zh':'zho','ar':'ara','tr':'tur','sv':'swe','fi':'fin','da':'dan','no':'nor','cs':'ces','hu':'hun','ro':'ron','el':'ell','vi':'vie','fa':'fas','sw':'swa','ca':'cat','is':'isl','ka':'kat','kk':'kaz','lb':'ltz','ne':'nep','sk':'slk','sl':'slv','sr':'srp','te':'tel','cy':'cym','hi':'hin','ml':'mal','id':'ind','lv':'lav'}; print(m[sys.argv[1]])" "$lang2")
+          case "$VOICE" in
+            en_*) ;;
+            *) echo "::error::Only English voices (en_*) are supported"; exit 1 ;;
+          esac
           sed -i "s/modelDir = null/modelDir = \"${model_dir}\"/" TtsEngine.kt
           sed -i "s/modelName = null/modelName = \"${VOICE}.onnx\"/" TtsEngine.kt
-          sed -i "s/lang = null/lang = \"${lang3}\"/" TtsEngine.kt
+          sed -i "s/lang = null/lang = \"eng\"/" TtsEngine.kt
           sed -i "s/usePhonemize = false/usePhonemize = true/" TtsEngine.kt
           grep -n -E 'modelDir = |modelName = |lang = |usePhonemize = ' TtsEngine.kt
 

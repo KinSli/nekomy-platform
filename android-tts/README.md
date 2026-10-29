@@ -8,15 +8,16 @@ It is built by `.github/workflows/build-tts-apk.yml` from:
 
 - [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) `v2.0.1`: its
   `SherpaOnnxTtsEngine` Android app and prebuilt native libraries
-- a [Piper](https://github.com/rhasspy/piper) voice, by default
-  **`en_US-amy-medium`** (US English, female), bundled inside the APK
+- a [Piper](https://github.com/rhasspy/piper) English voice, by default
+  **`en_GB-alan-medium`** (UK English, male), bundled inside the APK
 
 ## Getting the APK
 
 1. Open the repository on GitHub, then **Actions → build-tts-apk**.
 2. Open the latest successful run, or click **Run workflow** to build a
-   different voice (for example `en_US-lessac-medium` or `en_GB-alba-medium`;
-   see the `vits-piper-*` files on the
+   different English voice. Other UK male options are
+   `en_GB-southern_english_male-medium` and `en_GB-northern_english_male-medium`;
+   see the `vits-piper-en_*` files on the
    [tts-models release](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)).
 3. Download the `offline-tts-<voice>-apks` artifact and unzip it.
 
@@ -47,4 +48,4 @@ new build. To sign with your own stable key, add these repository secrets:
 ## Licenses
 
 sherpa-onnx is Apache-2.0. Each Piper voice has its own license, listed in its
-model card; `en_US-amy` is released for public use.
+model card.
