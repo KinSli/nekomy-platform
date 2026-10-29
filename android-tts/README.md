@@ -18,7 +18,7 @@ It is built by `.github/workflows/build-tts-apk.yml` from:
    different English voice. Other UK male options are
    `en_GB-southern_english_male-medium` and `en_GB-northern_english_male-medium`;
    see the `vits-piper-en_*` files on the
-   [tts-models release](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)).
+   [tts-models release](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models).
 3. Download the `offline-tts-<voice>-apks` artifact and unzip it.
 
 | APK | For |
