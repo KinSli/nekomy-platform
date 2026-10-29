@@ -1,0 +1,155 @@
+# Builds an offline, system-wide Android TTS engine APK.
+#
+# It packages the upstream sherpa-onnx "TTS Engine" Android app
+# (https://github.com/k2-fsa/sherpa-onnx/tree/master/android/SherpaOnnxTtsEngine)
+# together with a Piper voice model, so speech is generated fully on-device.
+# See android-tts/README.md for install and usage instructions.
+
+name: build-tts-apk
+
+on:
+  workflow_dispatch:
+    inputs:
+      voice:
+        description: "Piper voice (model dir without the 'vits-piper-' prefix), e.g. en_US-amy-medium, en_US-lessac-medium, en_GB-alba-medium"
+        required: true
+        default: "en_US-amy-medium"
+      sherpa_onnx_version:
+        description: "sherpa-onnx release tag"
+        required: true
+        default: "v2.0.1"
+  push:
+    branches:
+      - ccr-29e07c9a-wvy1zj
+    paths:
+      - ".github/workflows/build-tts-apk.yml"
+      - "android-tts/**"
+
+permissions:
+  contents: read
+
+env:
+  VOICE: ${{ github.event.inputs.voice || 'en_US-amy-medium' }}
+  SHERPA_ONNX_VERSION: ${{ github.event.inputs.sherpa_onnx_version || 'v2.0.1' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out sherpa-onnx ${{ env.SHERPA_ONNX_VERSION }}
+        uses: actions/checkout@v4
+        with:
+          repository: k2-fsa/sherpa-onnx
+          ref: ${{ env.SHERPA_ONNX_VERSION }}
+          path: sherpa-onnx
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Get native libraries (prebuilt, or build from source as fallback)
+        shell: bash
+        working-directory: sherpa-onnx
+        run: |
+          set -ex
+          url=https://github.com/k2-fsa/sherpa-onnx/releases/download/${SHERPA_ONNX_VERSION}/sherpa-onnx-${SHERPA_ONNX_VERSION}-android.tar.bz2
+          if curl -fSL -o libs.tar.bz2 "$url"; then
+            tar xf libs.tar.bz2
+            rm libs.tar.bz2
+          else
+            echo "Prebuilt libs not found, building from source with the NDK"
+            export ANDROID_NDK=$ANDROID_NDK_LATEST_HOME
+            export SHERPA_ONNX_ENABLE_TTS=ON
+            ./build-android-arm64-v8a.sh
+            ./build-android-armv7-eabi.sh
+            ./build-android-x86-64.sh
+            mkdir -p jniLibs/arm64-v8a jniLibs/armeabi-v7a jniLibs/x86_64
+            cp -v build-android-arm64-v8a/install/lib/*.so jniLibs/arm64-v8a/
+            cp -v build-android-armv7-eabi/install/lib/*.so jniLibs/armeabi-v7a/
+            cp -v build-android-x86-64/install/lib/*.so jniLibs/x86_64/
+          fi
+          ls -lhR jniLibs
+
+      - name: Add voice model to the app
+        shell: bash
+        working-directory: sherpa-onnx/android/SherpaOnnxTtsEngine/app/src/main/assets
+        run: |
+          set -ex
+          model_dir=vits-piper-${VOICE}
+          curl -fSL -O https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/${model_dir}.tar.bz2
+          tar xf ${model_dir}.tar.bz2
+          rm ${model_dir}.tar.bz2
+          # Unused since sherpa-onnx v2.0.0 (piper-phonemize bundles its own copy)
+          rm -rf ${model_dir}/espeak-ng-data
+          ls -lh ${model_dir}
+
+      - name: Configure engine for the voice
+        shell: bash
+        working-directory: sherpa-onnx/android/SherpaOnnxTtsEngine/app/src/main/java/com/k2fsa/sherpa/onnx/tts/engine
+        run: |
+          set -ex
+          model_dir=vits-piper-${VOICE}
+          lang2=${VOICE:0:2}
+          lang3=$(python3 -c "import sys; m={'en':'eng','de':'deu','fr':'fra','es':'spa','it':'ita','pt':'por','nl':'nld','ru':'rus','pl':'pol','uk':'ukr','zh':'zho','ar':'ara','tr':'tur','sv':'swe','fi':'fin','da':'dan','no':'nor','cs':'ces','hu':'hun','ro':'ron','el':'ell','vi':'vie','fa':'fas','sw':'swa','ca':'cat','is':'isl','ka':'kat','kk':'kaz','lb':'ltz','ne':'nep','sk':'slk','sl':'slv','sr':'srp','te':'tel','cy':'cym','hi':'hin','ml':'mal','id':'ind','lv':'lav'}; print(m[sys.argv[1]])" "$lang2")
+          sed -i "s/modelDir = null/modelDir = \"${model_dir}\"/" TtsEngine.kt
+          sed -i "s/modelName = null/modelName = \"${VOICE}.onnx\"/" TtsEngine.kt
+          sed -i "s/lang = null/lang = \"${lang3}\"/" TtsEngine.kt
+          sed -i "s/usePhonemize = false/usePhonemize = true/" TtsEngine.kt
+          grep -n -E 'modelDir = |modelName = |lang = |usePhonemize = ' TtsEngine.kt
+
+      - name: Build APKs
+        shell: bash
+        working-directory: sherpa-onnx
+        run: |
+          set -ex
+          mkdir -p ../apks
+          app=android/SherpaOnnxTtsEngine
+          sed -i 's/2048/8192/g' $app/gradle.properties
+          for arch in arm64-v8a armeabi-v7a x86_64; do
+            rm -f $app/app/src/main/jniLibs/*/*.so
+            mkdir -p $app/app/src/main/jniLibs/$arch
+            cp -v jniLibs/$arch/*.so $app/app/src/main/jniLibs/$arch/
+            (cd $app && ./gradlew --no-daemon assembleRelease)
+            mv -v $app/app/build/outputs/apk/release/app-release-unsigned.apk \
+              ../apks/offline-tts-${VOICE}-${arch}-unsigned.apk
+          done
+          ls -lh ../apks
+
+      - name: Sign APKs
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.TTS_APK_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.TTS_APK_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.TTS_APK_KEY_ALIAS }}
+        run: |
+          set -e
+          build_tools=$ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | sort -V | tail -n 1)
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > release.jks
+          else
+            echo "::warning::No signing secrets set; signing with a throwaway key. Uninstall before installing a build signed with a different key."
+            KEYSTORE_PASSWORD=android
+            KEY_ALIAS=tts
+            keytool -genkeypair -keystore release.jks -storepass "$KEYSTORE_PASSWORD" -keypass "$KEYSTORE_PASSWORD" \
+              -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Offline TTS"
+          fi
+          cd apks
+          for f in *-unsigned.apk; do
+            out=${f%-unsigned.apk}.apk
+            $build_tools/zipalign -p -f 4 "$f" aligned.apk
+            $build_tools/apksigner sign --ks ../release.jks --ks-pass pass:"$KEYSTORE_PASSWORD" \
+              --ks-key-alias "$KEY_ALIAS" --out "$out" aligned.apk
+            $build_tools/apksigner verify "$out"
+            rm -f "$f" aligned.apk "$out.idsig"
+          done
+          rm -f ../release.jks
+          ls -lh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: offline-tts-${{ env.VOICE }}-apks
+          path: apks/*.apk
+          if-no-files-found: error
